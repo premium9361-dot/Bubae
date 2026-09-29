@@ -1,0 +1,8 @@
+{
+  "name": "Bubaé | Modern Fashion Within Your Budget",
+  "description": "Discover modern girls' fashion at Bubaé. Shop stylish pants, minimalist t-shirts, and relaxed oversized tees — modern fashion within your budget with nationwide Cash on Delivery.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
