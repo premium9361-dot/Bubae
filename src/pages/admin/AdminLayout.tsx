@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useNavigation } from '../../context/NavigationContext';
 import { useAuth } from '../../context/AuthContext';
 import { BubaeLogo } from '../../components/BubaeLogo';
@@ -12,8 +12,9 @@ import {
   Database,
   CheckCircle,
   AlertCircle,
-  ShieldCheck,
   Settings,
+  Menu,
+  X,
 } from 'lucide-react';
 
 interface AdminLayoutProps {
@@ -24,16 +25,122 @@ interface AdminLayoutProps {
 export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, activeTab }) => {
   const { navigate } = useNavigation();
   const { user, signOut } = useAuth();
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const handleLogout = async () => {
     await signOut();
     navigate('/bubae-studio');
   };
 
+  const navItems = [
+    {
+      id: 'dashboard',
+      label: 'Dashboard',
+      icon: LayoutDashboard,
+      path: '/bubae-studio/dashboard',
+    },
+    {
+      id: 'products',
+      label: 'Products & Inventory',
+      icon: Package,
+      path: '/bubae-studio/products',
+    },
+    {
+      id: 'orders',
+      label: 'Customer Orders (COD)',
+      icon: ShoppingBag,
+      path: '/bubae-studio/orders',
+    },
+    {
+      id: 'settings',
+      label: 'Security & Settings',
+      icon: Settings,
+      path: '/bubae-studio/settings',
+    },
+  ];
+
+  const handleNavClick = (path: string) => {
+    setMobileMenuOpen(false);
+    navigate(path);
+  };
+
   return (
     <div className="min-h-screen bg-[#FDFBFB] flex flex-col md:flex-row text-stone-900 font-sans">
-      {/* Sidebar Navigation */}
-      <aside className="w-full md:w-64 bg-white border-r border-[#F7D8E2]/60 flex flex-col shrink-0">
+      {/* Mobile Top Header (< md screens) */}
+      <header className="md:hidden sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-[#F7D8E2]/60 px-4 py-3 flex items-center justify-between shadow-2xs">
+        <div
+          className="flex items-center gap-2 cursor-pointer"
+          onClick={() => handleNavClick('/bubae-studio/dashboard')}
+        >
+          <BubaeLogo className="scale-80 origin-left" />
+          <span className="text-[10px] tracking-widest uppercase font-bold text-[#BE185D]">
+            Studio
+          </span>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {/* Active section pill on mobile */}
+          <span className="text-[11px] font-semibold text-[#BE185D] bg-[#FFF0F3] px-2.5 py-1 rounded-full border border-[#F9CAD5]/60 capitalize">
+            {activeTab}
+          </span>
+
+          {/* Mobile Menu Toggle Button (Min 44px touch target) */}
+          <button
+            onClick={() => setMobileMenuOpen(prev => !prev)}
+            className="p-2.5 min-h-[44px] min-w-[44px] text-stone-700 hover:text-stone-900 rounded-xl hover:bg-stone-100 flex items-center justify-center transition-colors cursor-pointer"
+            aria-label="Toggle navigation menu"
+          >
+            {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+          </button>
+        </div>
+      </header>
+
+      {/* Mobile Dropdown Drawer Menu */}
+      {mobileMenuOpen && (
+        <div className="md:hidden bg-white border-b border-[#F7D8E2]/80 px-4 py-3 space-y-2 shadow-lg animate-in slide-in-from-top-2 duration-200">
+          <nav className="space-y-1">
+            {navItems.map(item => {
+              const Icon = item.icon;
+              const isActive = activeTab === item.id;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => handleNavClick(item.path)}
+                  className={`w-full flex items-center gap-3 px-3.5 py-3 min-h-[44px] rounded-xl text-xs font-semibold tracking-wide transition-colors cursor-pointer ${
+                    isActive
+                      ? 'bg-[#FFF0F3] text-[#BE185D]'
+                      : 'text-stone-600 hover:text-stone-900 hover:bg-stone-50'
+                  }`}
+                >
+                  <Icon className="w-4 h-4" />
+                  <span>{item.label}</span>
+                </button>
+              );
+            })}
+          </nav>
+
+          <div className="pt-2 border-t border-stone-100 flex items-center justify-between text-xs text-stone-600">
+            <button
+              onClick={() => handleNavClick('/')}
+              className="flex items-center gap-1.5 py-2 px-3 text-xs font-medium text-stone-700 hover:text-[#BE185D] rounded-lg"
+            >
+              <ExternalLink className="w-3.5 h-3.5 text-[#BE185D]" />
+              <span>Live Store</span>
+            </button>
+
+            <button
+              onClick={handleLogout}
+              className="flex items-center gap-1.5 py-2 px-3 text-xs font-medium text-rose-700 hover:bg-rose-50 rounded-lg"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span>Log Out</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Desktop Sidebar Navigation (Hidden on mobile) */}
+      <aside className="hidden md:flex w-64 bg-white border-r border-[#F7D8E2]/60 flex-col shrink-0 min-h-screen">
         {/* Brand Header */}
         <div className="p-6 border-b border-[#F7D8E2]/40 flex items-center justify-between">
           <div className="cursor-pointer" onClick={() => navigate('/bubae-studio/dashboard')}>
@@ -67,53 +174,24 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, activeTab })
 
         {/* Navigation Links */}
         <nav className="p-4 space-y-1.5 flex-1">
-          <button
-            onClick={() => navigate('/bubae-studio/dashboard')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-medium tracking-wide transition-colors cursor-pointer ${
-              activeTab === 'dashboard'
-                ? 'bg-[#FFF0F3] text-[#BE185D] font-semibold'
-                : 'text-stone-600 hover:text-stone-900 hover:bg-stone-50'
-            }`}
-          >
-            <LayoutDashboard className="w-4 h-4" />
-            <span>Dashboard</span>
-          </button>
-
-          <button
-            onClick={() => navigate('/bubae-studio/products')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-medium tracking-wide transition-colors cursor-pointer ${
-              activeTab === 'products'
-                ? 'bg-[#FFF0F3] text-[#BE185D] font-semibold'
-                : 'text-stone-600 hover:text-stone-900 hover:bg-stone-50'
-            }`}
-          >
-            <Package className="w-4 h-4" />
-            <span>Products & Inventory</span>
-          </button>
-
-          <button
-            onClick={() => navigate('/bubae-studio/orders')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-medium tracking-wide transition-colors cursor-pointer ${
-              activeTab === 'orders'
-                ? 'bg-[#FFF0F3] text-[#BE185D] font-semibold'
-                : 'text-stone-600 hover:text-stone-900 hover:bg-stone-50'
-            }`}
-          >
-            <ShoppingBag className="w-4 h-4" />
-            <span>Customer Orders (COD)</span>
-          </button>
-
-          <button
-            onClick={() => navigate('/bubae-studio/settings')}
-            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-medium tracking-wide transition-colors cursor-pointer ${
-              activeTab === 'settings'
-                ? 'bg-[#FFF0F3] text-[#BE185D] font-semibold'
-                : 'text-stone-600 hover:text-stone-900 hover:bg-stone-50'
-            }`}
-          >
-            <Settings className="w-4 h-4" />
-            <span>Security & Settings</span>
-          </button>
+          {navItems.map(item => {
+            const Icon = item.icon;
+            const isActive = activeTab === item.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => navigate(item.path)}
+                className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium tracking-wide transition-colors cursor-pointer ${
+                  isActive
+                    ? 'bg-[#FFF0F3] text-[#BE185D] font-semibold shadow-2xs'
+                    : 'text-stone-600 hover:text-stone-900 hover:bg-stone-50'
+                }`}
+              >
+                <Icon className="w-4 h-4" />
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
         </nav>
 
         {/* Bottom Actions */}
@@ -121,13 +199,13 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, activeTab })
           {/* View Public Storefront */}
           <button
             onClick={() => navigate('/')}
-            className="w-full flex items-center justify-between px-3.5 py-2 text-xs font-medium text-stone-700 hover:text-stone-900 hover:bg-stone-50 rounded-lg transition-colors cursor-pointer"
+            className="w-full flex items-center justify-between px-3.5 py-2.5 text-xs font-medium text-stone-700 hover:text-stone-900 hover:bg-stone-50 rounded-xl transition-colors cursor-pointer"
           >
             <span className="flex items-center gap-2">
               <ExternalLink className="w-3.5 h-3.5 text-[#BE185D]" />
               <span>View Live Store</span>
             </span>
-            <span className="text-[10px] text-stone-600 uppercase font-mono">Storefront</span>
+            <span className="text-[10px] text-stone-500 uppercase font-mono">Storefront</span>
           </button>
 
           {/* User Info & Clear Logout Button */}
@@ -137,7 +215,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, activeTab })
             </span>
             <button
               onClick={handleLogout}
-              className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-stone-600 hover:text-rose-700 hover:bg-rose-50 rounded-md transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-medium text-stone-600 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
               title="End Administrator Session"
             >
               <LogOut className="w-3.5 h-3.5" />
@@ -154,4 +232,3 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children, activeTab })
     </div>
   );
 };
-

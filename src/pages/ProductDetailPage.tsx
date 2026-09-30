@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useLayoutEffect } from 'react';
 import { fetchProductBySlug, fetchProducts, getCachedProductBySlug } from '../services/products';
+import { scrollToTop, getIsPopState } from '../lib/scroll';
 import { Product, ProductColor, ProductSize } from '../types';
 import { useCart } from '../context/CartContext';
 import { useWishlist } from '../context/WishlistContext';
@@ -61,6 +62,22 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
   const [activeTab, setActiveTab] = useState<'description' | 'fabric' | 'delivery' | 'policy'>('description');
   const [addedToast, setAddedToast] = useState(false);
   const [sizeError, setSizeError] = useState<string | null>(null);
+
+  // Guarantee product detail page ALWAYS opens at top (0, 0) on fresh navigation
+  useLayoutEffect(() => {
+    if (!getIsPopState()) {
+      scrollToTop(true);
+    }
+  }, [slug]);
+
+  useLayoutEffect(() => {
+    if (product && !getIsPopState()) {
+      const y = window.scrollY || document.documentElement?.scrollTop || 0;
+      if (y > 10) {
+        scrollToTop(true);
+      }
+    }
+  }, [product?.id]);
 
   useEffect(() => {
     let isMounted = true;

@@ -13,6 +13,8 @@ import { SearchOverlay } from './components/SearchOverlay';
 import { QuickViewModal } from './components/QuickViewModal';
 import { SizeGuideModal } from './components/SizeGuideModal';
 import { FloatingWhatsApp } from './components/FloatingWhatsApp';
+import { SEOHead } from './components/SEOHead';
+import { scrollToTop, getIsPopState } from './lib/scroll';
 
 import { HomePage } from './pages/HomePage';
 import { ShopPage } from './pages/ShopPage';
@@ -44,6 +46,13 @@ const MainLayout: React.FC = () => {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isSizeGuideOpen, setIsSizeGuideOpen] = useState(false);
   const [quickViewProduct, setQuickViewProduct] = useState<Product | null>(null);
+
+  // Guarantee product page scroll position starts at top (0, 0)
+  React.useLayoutEffect(() => {
+    if (route.name === 'product' && !getIsPopState()) {
+      scrollToTop(true);
+    }
+  }, [currentPath, route.name]);
 
   const handleOpenQuickView = (product: Product) => {
     setQuickViewProduct(product);
@@ -163,6 +172,11 @@ const MainLayout: React.FC = () => {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+            onAnimationStart={() => {
+              if (route.name === 'product' && !getIsPopState()) {
+                scrollToTop(true);
+              }
+            }}
           >
             {renderCurrentPage()}
           </motion.div>

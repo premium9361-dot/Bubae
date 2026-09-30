@@ -8,6 +8,7 @@ import {
   getCurrentSessionTokenId,
   updateSessionHeartbeat,
 } from '../services/sessionTracker';
+import { checkLoginRateLimit, recordFailedLoginAttempt, resetLoginAttempts } from '../lib/security';
 
 interface AuthContextType {
   user: AdminUser | null;
@@ -193,9 +194,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const signIn = async (identifier: string, password: string): Promise<{ success: boolean; error?: string }> => {
     setError(null);
-    setLoading(true);
 
     const cleanIdentifier = identifier.trim();
+    if (!cleanIdentifier || !password) {
+      const err = 'Please enter both username and password.';
+      setError(err);
+      return { success: false, error: err };
+    }
+
+    // Rate Limiting & Lockout Check
+    const rateCheck = checkLoginRateLimit(cleanIdentifier);
+    if (rateCheck.isLocked) {
+      const lockMsg = `Too many failed attempts. For your security, this account is temporarily locked for ${rateCheck.remainingSeconds || 60} seconds.`;
+      setError(lockMsg);
+      return { success: false, error: lockMsg };
+    }
+
+    setLoading(true);
+
     const normalizedUser = cleanIdentifier.toLowerCase();
     const mappedEmail = cleanIdentifier.includes('@')
       ? cleanIdentifier.toLowerCase()
@@ -226,11 +242,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setUser(adminUser);
             localStorage.setItem(LOCAL_ADMIN_SESSION_KEY, JSON.stringify(adminUser));
             await recordAdminSession(adminUser.id);
+            resetLoginAttempts(cleanIdentifier);
             setLoading(false);
             return { success: true };
           } else {
             await supabase.auth.signOut();
             setLoading(false);
+            recordFailedLoginAttempt(cleanIdentifier);
             const msg = 'Unauthorized: Administrator privileges required for Bubaé Studio.';
             setError(msg);
             return { success: false, error: msg };
@@ -263,13 +281,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         localStorage.setItem(LOCAL_ADMIN_SESSION_KEY, JSON.stringify(adminUser));
         setUser(adminUser);
         await recordAdminSession(adminUser.id);
+        resetLoginAttempts(cleanIdentifier);
         setLoading(false);
         return { success: true };
       }
     }
 
     setLoading(false);
-    const failMsg = 'Invalid credentials. Please verify your administrator username and password.';
+    const lockoutStatus = recordFailedLoginAttempt(cleanIdentifier);
+    const failMsg = lockoutStatus.isLocked
+      ? `Too many failed attempts. For your security, this account has been locked for ${lockoutStatus.remainingSeconds || 60} seconds.`
+      : 'Invalid credentials. Please verify your administrator username and password.';
     setError(failMsg);
     return { success: false, error: failMsg };
   };

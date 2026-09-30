@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { fetchProducts, fetchCategories } from '../services/products';
+import { fetchProducts, fetchCategories, getLocalCustomerProducts, getLocalCategories } from '../services/products';
 import { subscribeToStore } from '../services/localStore';
 import { ProductCard } from '../components/ProductCard';
 import { Product, Category } from '../types';
@@ -18,9 +18,9 @@ export const ShopPage: React.FC<ShopPageProps> = ({
   initialCategory,
   onQuickView,
 }) => {
-  const [products, setProducts] = useState<Product[]>([]);
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [products, setProducts] = useState<Product[]>(() => getLocalCustomerProducts());
+  const [categories, setCategories] = useState<Category[]>(() => getLocalCategories());
+  const [loading, setLoading] = useState<boolean>(() => getLocalCustomerProducts().length === 0);
 
   // Filters state
   const [selectedCategory, setSelectedCategory] = useState<string>(initialCategory || 'all');
@@ -38,24 +38,33 @@ export const ShopPage: React.FC<ShopPageProps> = ({
   }, [initialCategory]);
 
   useEffect(() => {
+    let isMounted = true;
     async function loadData() {
-      setLoading(true);
       const [prods, cats] = await Promise.all([
         fetchProducts({ forCustomer: true }),
         fetchCategories(),
       ]);
-      setProducts(prods);
-      setCategories(cats);
-      setLoading(false);
+      if (isMounted) {
+        setProducts(prods);
+        setCategories(cats);
+        setLoading(false);
+      }
     }
 
     loadData();
 
     const unsubscribe = subscribeToStore(() => {
-      loadData();
+      if (isMounted) {
+        setProducts(getLocalCustomerProducts());
+        setCategories(getLocalCategories());
+        setLoading(false);
+      }
     });
 
-    return unsubscribe;
+    return () => {
+      isMounted = false;
+      unsubscribe();
+    };
   }, []);
 
   const toggleSize = (size: string) => {

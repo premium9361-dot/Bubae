@@ -1,6 +1,6 @@
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
-import { Product, Order, OrderStatus, ProductVariant, OrderEditHistoryEntry } from '../types';
-import { LocalStore, ensureProductVariants } from './localStore';
+import { Product, Order, OrderStatus, ProductVariant, OrderEditHistoryEntry, Category } from '../types';
+import { LocalStore, ensureProductVariants, subscribeToStore } from './localStore';
 
 export interface DashboardStats {
   totalProducts: number;
@@ -27,48 +27,110 @@ export interface RevenueAnalyticsData {
   monthlyBreakdown: MonthlyRevenueItem[];
 }
 
-export async function adminFetchDashboardStats(): Promise<DashboardStats> {
-  // Parallel lightweight projection queries for near-instant dashboard loading
-  if (isSupabaseConfigured) {
-    try {
-      const [prodsRes, ordersRes] = await Promise.all([
-        supabase.from('products').select('stock, is_available'),
-        supabase.from('orders').select('status, total_amount'),
-      ]);
+// ==========================================
+// HIGH-SPEED IN-MEMORY CACHE LAYER
+// Prevents redundant network requests and eliminates loading spinners
+// ==========================================
+let cachedAdminProducts: Product[] | null = null;
+let cachedAdminProductsTime = 0;
 
-      if (!prodsRes.error && prodsRes.data && !ordersRes.error && ordersRes.data) {
-        const products = prodsRes.data;
-        const orders = ordersRes.data;
+let cachedAdminOrders: Order[] | null = null;
+let cachedAdminOrdersTime = 0;
 
-        const outOfStock = products.filter(p => Number(p.stock) <= 0 || !p.is_available).length;
-        const available = products.filter(p => Number(p.stock) > 0 && p.is_available).length;
+let cachedAdminCategories: Category[] | null = null;
+let cachedAdminCategoriesTime = 0;
 
-        const pending = orders.filter(o => o.status === 'Pending').length;
-        const confirmed = orders.filter(o => o.status === 'Confirmed').length;
-        const delivered = orders.filter(o => o.status === 'Delivered').length;
+let cachedAdminStats: DashboardStats | null = null;
+let cachedAdminStatsTime = 0;
 
-        const totalRevenue = orders
-          .filter(o => o.status !== 'Cancelled')
-          .reduce((sum, o) => sum + (Number(o.total_amount) || 0), 0);
+let cachedAdminAnalytics: RevenueAnalyticsData | null = null;
+let cachedAdminAnalyticsTime = 0;
 
-        return {
-          totalProducts: products.length,
-          availableProducts: available,
-          outOfStockProducts: outOfStock,
-          pendingOrders: pending,
-          confirmedOrders: confirmed,
-          deliveredOrders: delivered,
-          totalRevenue,
-        };
-      }
-    } catch (err) {
-      console.warn('Optimized dashboard stats fallback:', err);
-    }
+const CACHE_TTL_MS = 60_000; // 60 seconds TTL
+
+export function adminInvalidateProductsCache() {
+  cachedAdminProducts = null;
+  cachedAdminProductsTime = 0;
+  cachedAdminStats = null;
+}
+
+export function adminInvalidateOrdersCache() {
+  cachedAdminOrders = null;
+  cachedAdminOrdersTime = 0;
+  cachedAdminStats = null;
+  cachedAdminAnalytics = null;
+}
+
+export function adminInvalidateAllCache() {
+  cachedAdminProducts = null;
+  cachedAdminProductsTime = 0;
+  cachedAdminOrders = null;
+  cachedAdminOrdersTime = 0;
+  cachedAdminCategories = null;
+  cachedAdminCategoriesTime = 0;
+  cachedAdminStats = null;
+  cachedAdminStatsTime = 0;
+  cachedAdminAnalytics = null;
+  cachedAdminAnalyticsTime = 0;
+}
+
+// Automatically sync when LocalStore emits a mutation
+subscribeToStore(() => {
+  // If an external mutation occurred, refresh cached arrays from LocalStore without dropping references
+  const localProds = LocalStore.getProducts();
+  if (localProds && localProds.length > 0) {
+    cachedAdminProducts = localProds;
+  }
+  const localOrds = LocalStore.getOrders();
+  if (localOrds && localOrds.length > 0) {
+    cachedAdminOrders = localOrds;
+  }
+  cachedAdminStats = null;
+  cachedAdminAnalytics = null;
+});
+
+// ==========================================
+// SYNCHRONOUS 0ms GETTERS
+// Allows every admin page to render immediately on mount with zero delay
+// ==========================================
+
+export function adminGetLocalProducts(): Product[] {
+  if (cachedAdminProducts && cachedAdminProducts.length > 0) {
+    return cachedAdminProducts;
+  }
+  const local = LocalStore.getProducts();
+  cachedAdminProducts = local;
+  cachedAdminProductsTime = Date.now();
+  return local;
+}
+
+export function adminGetLocalCategories(): Category[] {
+  if (cachedAdminCategories && cachedAdminCategories.length > 0) {
+    return cachedAdminCategories;
+  }
+  const local = LocalStore.getCategories();
+  cachedAdminCategories = local;
+  cachedAdminCategoriesTime = Date.now();
+  return local;
+}
+
+export function adminGetLocalOrders(): Order[] {
+  if (cachedAdminOrders && cachedAdminOrders.length > 0) {
+    return cachedAdminOrders;
+  }
+  const local = LocalStore.getOrders();
+  cachedAdminOrders = local;
+  cachedAdminOrdersTime = Date.now();
+  return local;
+}
+
+export function adminGetLocalDashboardStats(): DashboardStats {
+  if (cachedAdminStats && Date.now() - cachedAdminStatsTime < CACHE_TTL_MS) {
+    return cachedAdminStats;
   }
 
-  // Fast local calculation
-  const products = LocalStore.getProducts();
-  const orders = LocalStore.getOrders();
+  const products = adminGetLocalProducts();
+  const orders = adminGetLocalOrders();
 
   const outOfStock = products.filter(p => p.stock <= 0 || !p.is_available).length;
   const available = products.filter(p => p.stock > 0 && p.is_available).length;
@@ -81,7 +143,7 @@ export async function adminFetchDashboardStats(): Promise<DashboardStats> {
     .filter(o => o.status !== 'Cancelled')
     .reduce((sum, o) => sum + (Number(o.total_amount) || 0), 0);
 
-  return {
+  const stats: DashboardStats = {
     totalProducts: products.length,
     availableProducts: available,
     outOfStockProducts: outOfStock,
@@ -90,10 +152,22 @@ export async function adminFetchDashboardStats(): Promise<DashboardStats> {
     deliveredOrders: delivered,
     totalRevenue,
   };
+
+  cachedAdminStats = stats;
+  cachedAdminStatsTime = Date.now();
+  return stats;
 }
 
-export async function adminFetchRevenueAnalytics(): Promise<RevenueAnalyticsData> {
-  const orders = await adminFetchOrders();
+export function adminGetLocalRecentOrders(limit = 5): Order[] {
+  return adminGetLocalOrders().slice(0, limit);
+}
+
+export function adminGetLocalRevenueAnalytics(): RevenueAnalyticsData {
+  if (cachedAdminAnalytics && Date.now() - cachedAdminAnalyticsTime < CACHE_TTL_MS) {
+    return cachedAdminAnalytics;
+  }
+
+  const orders = adminGetLocalOrders();
   const validOrders = orders.filter(o => o.status !== 'Cancelled');
   const totalRevenue = validOrders.reduce((sum, o) => sum + (Number(o.total_amount) || 0), 0);
   const totalOrders = validOrders.length;
@@ -107,7 +181,7 @@ export async function adminFetchRevenueAnalytics(): Promise<RevenueAnalyticsData
 
   const monthMap = new Map<string, { month: string; shortMonth: string; year: number; revenue: number; ordersCount: number; timestamp: number }>();
 
-  // Ensure recent 6 months are represented
+  // Ensure recent 6 months are always represented
   const now = new Date();
   for (let i = 5; i >= 0; i--) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
@@ -154,15 +228,91 @@ export async function adminFetchRevenueAnalytics(): Promise<RevenueAnalyticsData
       ordersCount,
     }));
 
-  return {
+  const result: RevenueAnalyticsData = {
     totalRevenue,
     totalOrders,
     averageOrderValue,
     monthlyBreakdown,
   };
+
+  cachedAdminAnalytics = result;
+  cachedAdminAnalyticsTime = Date.now();
+  return result;
+}
+
+// ==========================================
+// ASYNC SERVICE METHODS (CACHED + REVALIDATED)
+// ==========================================
+
+export async function adminFetchDashboardStats(): Promise<DashboardStats> {
+  const now = Date.now();
+  if (cachedAdminStats && now - cachedAdminStatsTime < 30_000) {
+    return cachedAdminStats;
+  }
+
+  // Parallel lightweight projection queries for near-instant dashboard sync
+  if (isSupabaseConfigured) {
+    try {
+      const [prodsRes, ordersRes] = await Promise.all([
+        supabase.from('products').select('stock, is_available'),
+        supabase.from('orders').select('status, total_amount'),
+      ]);
+
+      if (!prodsRes.error && prodsRes.data && !ordersRes.error && ordersRes.data) {
+        const products = prodsRes.data;
+        const orders = ordersRes.data;
+
+        const outOfStock = products.filter(p => Number(p.stock) <= 0 || !p.is_available).length;
+        const available = products.filter(p => Number(p.stock) > 0 && p.is_available).length;
+
+        const pending = orders.filter(o => o.status === 'Pending').length;
+        const confirmed = orders.filter(o => o.status === 'Confirmed').length;
+        const delivered = orders.filter(o => o.status === 'Delivered').length;
+
+        const totalRevenue = orders
+          .filter(o => o.status !== 'Cancelled')
+          .reduce((sum, o) => sum + (Number(o.total_amount) || 0), 0);
+
+        const stats: DashboardStats = {
+          totalProducts: products.length,
+          availableProducts: available,
+          outOfStockProducts: outOfStock,
+          pendingOrders: pending,
+          confirmedOrders: confirmed,
+          deliveredOrders: delivered,
+          totalRevenue,
+        };
+
+        cachedAdminStats = stats;
+        cachedAdminStatsTime = now;
+        return stats;
+      }
+    } catch (err) {
+      console.warn('Optimized dashboard stats fallback:', err);
+    }
+  }
+
+  return adminGetLocalDashboardStats();
+}
+
+export async function adminFetchRevenueAnalytics(): Promise<RevenueAnalyticsData> {
+  // Use instant calculation from cached orders whenever available
+  if (cachedAdminOrders && cachedAdminOrders.length > 0 && Date.now() - cachedAdminOrdersTime < CACHE_TTL_MS) {
+    return adminGetLocalRevenueAnalytics();
+  }
+
+  // Otherwise fetch orders and calculate
+  await adminFetchOrders();
+  return adminGetLocalRevenueAnalytics();
 }
 
 export async function adminFetchOrderDetails(orderId: string): Promise<Order | null> {
+  // First check in-memory orders cache
+  const cached = adminGetLocalOrders().find(o => o.id === orderId);
+  if (cached && cached.items && cached.items.length > 0) {
+    return cached;
+  }
+
   if (isSupabaseConfigured) {
     try {
       const { data, error } = await supabase
@@ -179,81 +329,16 @@ export async function adminFetchOrderDetails(orderId: string): Promise<Order | n
     }
   }
 
-  const all = LocalStore.getOrders();
-  return all.find(o => o.id === orderId) || null;
-}
-
-export async function adminUpdateOrder(
-  orderId: string,
-  updates: Partial<Order>,
-  changedBy = 'Admin'
-): Promise<{ success: boolean; order?: Order; error?: string }> {
-  const orders = await adminFetchOrders();
-  const current = orders.find(o => o.id === orderId);
-  if (!current) {
-    return { success: false, error: 'Order not found.' };
-  }
-
-  const fieldLabels: Record<string, string> = {
-    customer_name: 'Customer Name',
-    phone: 'Phone Number',
-    address: 'Order Address',
-    district: 'District / City',
-    area: 'Area / Upazila',
-    order_number: 'Order Number',
-  };
-
-  const newHistoryEntries: OrderEditHistoryEntry[] = [];
-  const now = new Date().toISOString();
-
-  Object.entries(updates).forEach(([key, val]) => {
-    if (fieldLabels[key] && String((current as any)[key] ?? '') !== String(val ?? '')) {
-      newHistoryEntries.push({
-        id: 'hist_' + Math.random().toString(36).substring(2, 9),
-        field: key,
-        field_label: fieldLabels[key],
-        previous_value: String((current as any)[key] ?? ''),
-        new_value: String(val ?? ''),
-        changed_at: now,
-        changed_by: changedBy,
-      });
-    }
-  });
-
-  const existingHistory = current.edit_history || [];
-  const updatedHistory = [...newHistoryEntries, ...existingHistory];
-
-  const fullUpdates: Partial<Order> = {
-    ...updates,
-    edit_history: updatedHistory,
-    updated_at: now,
-  };
-
-  if (isSupabaseConfigured) {
-    try {
-      await supabase
-        .from('orders')
-        .update({
-          customer_name: fullUpdates.customer_name ?? current.customer_name,
-          phone: fullUpdates.phone ?? current.phone,
-          address: fullUpdates.address ?? current.address,
-          area: fullUpdates.area ?? current.area,
-          district: fullUpdates.district ?? current.district,
-          order_number: fullUpdates.order_number ?? current.order_number,
-          notes: fullUpdates.notes !== undefined ? fullUpdates.notes : current.notes,
-          updated_at: now,
-        })
-        .eq('id', orderId);
-    } catch (err) {
-      console.warn('Supabase update order note:', err);
-    }
-  }
-
-  const updatedOrder = LocalStore.updateOrder(orderId, fullUpdates);
-  return { success: true, order: updatedOrder || ({ ...current, ...fullUpdates } as Order) };
+  return cached || null;
 }
 
 export async function adminFetchProducts(): Promise<Product[]> {
+  const now = Date.now();
+  // Return cached products if within TTL to avoid duplicate Supabase requests
+  if (cachedAdminProducts && now - cachedAdminProductsTime < CACHE_TTL_MS) {
+    return cachedAdminProducts;
+  }
+
   if (isSupabaseConfigured) {
     try {
       const { data, error } = await supabase
@@ -263,7 +348,7 @@ export async function adminFetchProducts(): Promise<Product[]> {
         .order('created_at', { ascending: false });
 
       if (!error && data) {
-        return data.map((item: any) => {
+        const products = data.map((item: any) => {
           let sizeStock: Record<string, number> = {};
           if (Array.isArray(item.variants) && item.variants.length > 0) {
             item.variants.forEach((v: ProductVariant) => {
@@ -275,13 +360,18 @@ export async function adminFetchProducts(): Promise<Product[]> {
             sizeStock: Object.keys(sizeStock).length > 0 ? sizeStock : item.sizeStock,
           });
         });
+
+        cachedAdminProducts = products;
+        cachedAdminProductsTime = now;
+        LocalStore.saveProducts(products);
+        return products;
       }
     } catch (err) {
       console.warn('Admin fetch products fallback:', err);
     }
   }
 
-  return LocalStore.getProducts();
+  return adminGetLocalProducts();
 }
 
 export async function adminCreateProduct(
@@ -300,9 +390,20 @@ export async function adminCreateProduct(
     sizes: Object.keys(sizeStock).length > 0 ? Object.keys(sizeStock) : productData.sizes,
   };
 
+  // Optimistically store in local store immediately
+  const localCreated = LocalStore.addProduct({
+    ...payload,
+    sizeStock,
+  });
+
+  // Update in-memory cache
+  if (cachedAdminProducts) {
+    cachedAdminProducts = [localCreated, ...cachedAdminProducts.filter(p => p.id !== localCreated.id)];
+  }
+  adminInvalidateProductsCache();
+
   if (isSupabaseConfigured) {
     try {
-      // 1. Insert product record
       const { data: createdProduct, error: prodError } = await supabase
         .from('products')
         .insert([{
@@ -326,7 +427,6 @@ export async function adminCreateProduct(
         .single();
 
       if (!prodError && createdProduct) {
-        // 2. Insert variants
         if (Object.keys(sizeStock).length > 0) {
           const variantRows = Object.entries(sizeStock).map(([size, stk]) => ({
             product_id: createdProduct.id,
@@ -340,7 +440,10 @@ export async function adminCreateProduct(
           ...createdProduct,
           sizeStock,
         });
-        LocalStore.addProduct(fullProduct);
+        LocalStore.updateProduct(localCreated.id, fullProduct);
+        if (cachedAdminProducts) {
+          cachedAdminProducts = cachedAdminProducts.map(p => p.id === localCreated.id ? fullProduct : p);
+        }
         return { success: true, product: fullProduct };
       }
     } catch (err: any) {
@@ -348,12 +451,7 @@ export async function adminCreateProduct(
     }
   }
 
-  // Local fallback
-  const created = LocalStore.addProduct({
-    ...payload,
-    sizeStock,
-  });
-  return { success: true, product: created };
+  return { success: true, product: localCreated };
 }
 
 export async function adminUpdateProduct(
@@ -370,6 +468,19 @@ export async function adminUpdateProduct(
   const isAvailable = updates.is_available !== undefined
     ? updates.is_available
     : (totalStock !== undefined ? totalStock > 0 : true);
+
+  // Optimistic update in LocalStore and in-memory cache
+  const updatedLocal = LocalStore.updateProduct(id, {
+    ...updates,
+    sizeStock,
+    stock: totalStock,
+    is_available: (totalStock ?? 1) > 0 && isAvailable,
+  });
+
+  if (cachedAdminProducts && updatedLocal) {
+    cachedAdminProducts = cachedAdminProducts.map(p => p.id === id ? updatedLocal! : p);
+  }
+  adminInvalidateProductsCache();
 
   if (isSupabaseConfigured) {
     try {
@@ -399,7 +510,6 @@ export async function adminUpdateProduct(
         .single();
 
       if (!error && data) {
-        // Upsert variants in product_variants table
         if (sizeStock) {
           for (const [size, stk] of Object.entries(sizeStock)) {
             await supabase
@@ -416,6 +526,9 @@ export async function adminUpdateProduct(
           sizeStock: sizeStock || updates.sizeStock,
         });
         LocalStore.updateProduct(id, fullProduct);
+        if (cachedAdminProducts) {
+          cachedAdminProducts = cachedAdminProducts.map(p => p.id === id ? fullProduct : p);
+        }
         return { success: true, product: fullProduct };
       }
     } catch (err) {
@@ -423,15 +536,8 @@ export async function adminUpdateProduct(
     }
   }
 
-  const updated = LocalStore.updateProduct(id, {
-    ...updates,
-    sizeStock,
-    stock: totalStock,
-    is_available: (totalStock ?? 1) > 0 && isAvailable,
-  });
-
-  if (updated) {
-    return { success: true, product: updated };
+  if (updatedLocal) {
+    return { success: true, product: updatedLocal };
   }
   return { success: false, error: 'Product not found.' };
 }
@@ -441,8 +547,8 @@ export async function adminUpdateSizeStock(
   size: string,
   newStock: number
 ): Promise<{ success: boolean; product?: Product; error?: string }> {
-  const products = await adminFetchProducts();
-  const target = products.find(p => p.id === productId);
+  const currentProds = adminGetLocalProducts();
+  const target = currentProds.find(p => p.id === productId);
   if (!target) return { success: false, error: 'Product not found' };
 
   const nextSizeStock = { ...(target.sizeStock || {}), [size]: Math.max(0, newStock) };
@@ -450,11 +556,17 @@ export async function adminUpdateSizeStock(
 }
 
 export async function adminDeleteProduct(id: string): Promise<{ success: boolean; error?: string }> {
+  // Optimistic local delete
+  LocalStore.deleteProduct(id);
+  if (cachedAdminProducts) {
+    cachedAdminProducts = cachedAdminProducts.filter(p => p.id !== id);
+  }
+  adminInvalidateProductsCache();
+
   if (isSupabaseConfigured) {
     try {
       const { error } = await supabase.from('products').delete().eq('id', id);
       if (!error) {
-        LocalStore.deleteProduct(id);
         return { success: true };
       }
     } catch (err) {
@@ -462,12 +574,10 @@ export async function adminDeleteProduct(id: string): Promise<{ success: boolean
     }
   }
 
-  LocalStore.deleteProduct(id);
   return { success: true };
 }
 
 export async function adminUploadProductImage(file: File): Promise<{ success: boolean; url?: string; error?: string }> {
-  // If Supabase Storage is configured, attempt bucket upload
   if (isSupabaseConfigured) {
     try {
       const fileExt = file.name.split('.').pop() || 'jpg';
@@ -493,7 +603,6 @@ export async function adminUploadProductImage(file: File): Promise<{ success: bo
     }
   }
 
-  // Local fallback: generate Base64 data URL
   return new Promise((resolve) => {
     const reader = new FileReader();
     reader.onloadend = () => {
@@ -507,6 +616,11 @@ export async function adminUploadProductImage(file: File): Promise<{ success: bo
 }
 
 export async function adminFetchOrders(): Promise<Order[]> {
+  const now = Date.now();
+  if (cachedAdminOrders && now - cachedAdminOrdersTime < CACHE_TTL_MS) {
+    return cachedAdminOrders;
+  }
+
   if (isSupabaseConfigured) {
     try {
       const { data, error } = await supabase
@@ -515,21 +629,33 @@ export async function adminFetchOrders(): Promise<Order[]> {
         .order('created_at', { ascending: false });
 
       if (!error && data) {
-        LocalStore.saveOrders(data as Order[]);
-        return data as Order[];
+        const ords = data as Order[];
+        cachedAdminOrders = ords;
+        cachedAdminOrdersTime = now;
+        LocalStore.saveOrders(ords);
+        return ords;
       }
     } catch (err) {
       console.warn('Supabase orders fetch fallback:', err);
     }
   }
 
-  return LocalStore.getOrders();
+  return adminGetLocalOrders();
 }
 
 export async function adminUpdateOrderStatus(
   orderId: string,
   status: OrderStatus
 ): Promise<{ success: boolean; error?: string }> {
+  // Optimistically update local store and in-memory cache
+  LocalStore.updateOrderStatus(orderId, status);
+  if (cachedAdminOrders) {
+    cachedAdminOrders = cachedAdminOrders.map(o =>
+      o.id === orderId ? { ...o, status, updated_at: new Date().toISOString() } : o
+    );
+  }
+  adminInvalidateOrdersCache();
+
   if (isSupabaseConfigured) {
     try {
       const { error } = await supabase
@@ -538,7 +664,6 @@ export async function adminUpdateOrderStatus(
         .eq('id', orderId);
 
       if (!error) {
-        LocalStore.updateOrderStatus(orderId, status);
         return { success: true };
       }
     } catch (err) {
@@ -546,6 +671,97 @@ export async function adminUpdateOrderStatus(
     }
   }
 
-  LocalStore.updateOrderStatus(orderId, status);
   return { success: true };
+}
+
+export async function adminUpdateOrderDetails(
+  orderId: string,
+  updates: Partial<Order>,
+  changedBy = 'Admin'
+): Promise<{ success: boolean; order?: Order; error?: string }> {
+  const orders = adminGetLocalOrders();
+  const current = orders.find(o => o.id === orderId);
+  if (!current) {
+    return { success: false, error: 'Order not found' };
+  }
+
+  const fieldLabels: Record<string, string> = {
+    customer_name: 'Customer Name',
+    phone: 'Phone Number',
+    address: 'Delivery Address',
+    district: 'District',
+    area: 'Area / Upazila',
+    delivery_area: 'Delivery Zone',
+    delivery_charge: 'Delivery Charge',
+    total_amount: 'Total Amount',
+    status: 'Order Status',
+    notes: 'Notes',
+  };
+
+  const newHistoryEntries: OrderEditHistoryEntry[] = [];
+  const now = new Date().toISOString();
+
+  for (const [key, label] of Object.entries(fieldLabels)) {
+    if (key in updates) {
+      const prevVal = String((current as any)[key] ?? '');
+      const newVal = String((updates as any)[key] ?? '');
+      if (prevVal !== newVal) {
+        newHistoryEntries.push({
+          id: `edit-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+          field: key,
+          field_label: label,
+          previous_value: prevVal,
+          new_value: newVal,
+          changed_at: now,
+          changed_by: changedBy,
+        });
+      }
+    }
+  }
+
+  const mergedHistory: OrderEditHistoryEntry[] = [
+    ...newHistoryEntries,
+    ...(current.edit_history || []),
+  ];
+
+  const fullUpdates: Partial<Order> = {
+    ...updates,
+    edit_history: mergedHistory,
+    updated_at: now,
+  };
+
+  // Optimistically update in LocalStore and in-memory cache
+  const updatedOrder = LocalStore.updateOrder(orderId, fullUpdates);
+  if (cachedAdminOrders && updatedOrder) {
+    cachedAdminOrders = cachedAdminOrders.map(o => o.id === orderId ? updatedOrder! : o);
+  }
+  adminInvalidateOrdersCache();
+
+  if (isSupabaseConfigured) {
+    try {
+      await supabase
+        .from('orders')
+        .update({
+          customer_name: fullUpdates.customer_name ?? current.customer_name,
+          phone: fullUpdates.phone ?? current.phone,
+          address: fullUpdates.address ?? current.address,
+          area: fullUpdates.area ?? current.area,
+          district: fullUpdates.district ?? current.district,
+          delivery_area: fullUpdates.delivery_area ?? current.delivery_area,
+          delivery_charge: fullUpdates.delivery_charge ?? current.delivery_charge,
+          total_amount: fullUpdates.total_amount ?? current.total_amount,
+          status: fullUpdates.status ?? current.status,
+          notes: fullUpdates.notes ?? current.notes,
+          updated_at: now,
+        })
+        .eq('id', orderId);
+    } catch (err) {
+      console.warn('Supabase order update fallback:', err);
+    }
+  }
+
+  if (updatedOrder) {
+    return { success: true, order: updatedOrder };
+  }
+  return { success: false, error: 'Failed to update order locally' };
 }

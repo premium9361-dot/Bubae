@@ -2,6 +2,7 @@ import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { Order } from '../types';
 import { LocalStore } from './localStore';
 import { calculateDelivery } from './delivery';
+import { validateOrderInput, checkOrderRateLimit } from '../lib/security';
 
 export interface CreateOrderPayload {
   customer_name: string;
@@ -29,15 +30,28 @@ export interface OrderResult {
   error?: string;
 }
 
-export async function submitOrder(payload: CreateOrderPayload): Promise<OrderResult> {
-  if (!payload.policy_accepted) {
+export async function submitOrder(rawPayload: CreateOrderPayload): Promise<OrderResult> {
+  // 1. Strict Input Validation & XSS Sanitization
+  const validation = validateOrderInput(rawPayload);
+  if (!validation.isValid || !validation.cleanPayload) {
     return {
       success: false,
-      error: 'You must agree to Bubaé’s No Return / No Exchange policy before placing your order.',
+      error: validation.error || 'Invalid order information submitted.',
     };
   }
 
-  // Authoritative Backend Validation: Never trust client-supplied delivery charge!
+  const payload = validation.cleanPayload;
+
+  // 2. Client-side abuse & rapid duplicate order rate limiting
+  const rateLimitCheck = checkOrderRateLimit();
+  if (!rateLimitCheck.allowed) {
+    return {
+      success: false,
+      error: `Too many order requests in a short time. For security, please wait ${rateLimitCheck.waitSeconds || 30} seconds before submitting again.`,
+    };
+  }
+
+  // 3. Authoritative Backend Validation: Never trust client-supplied delivery charge!
   // Calculate delivery zone and charge authoritatively from the structured district and area.
   const deliveryCalc = calculateDelivery(payload.district, payload.area);
   const authoritativeDeliveryZone = deliveryCalc.zone;
@@ -52,7 +66,7 @@ export async function submitOrder(payload: CreateOrderPayload): Promise<OrderRes
 
   if (isSupabaseConfigured) {
     try {
-      // 1. Call atomic database RPC function: create_order_secure
+      // Call atomic database RPC function: create_order_secure
       const deliveryNotePrefix = `[Delivery: ${authoritativeDeliveryZone} (৳${authoritativeDeliveryCharge}) | District: ${payload.district}${payload.area ? ' - Area: ' + payload.area : ''}] `;
       const formattedNotes = (deliveryNotePrefix + (payload.notes || '')).trim() || null;
 
@@ -102,18 +116,19 @@ export async function submitOrder(payload: CreateOrderPayload): Promise<OrderRes
           total_amount: total,
         };
       } else if (error) {
-        console.warn('Supabase RPC order error, attempting local fallback:', error.message);
-        // If it's a validation error (like stock insufficient), surface it
-        if (error.message.includes('longer available') || error.message.includes('stock')) {
-          return { success: false, error: error.message };
+        // Safe error handling: never expose SQL or database internals to customers
+        const msg = error.message || '';
+        if (msg.includes('longer available') || msg.includes('stock') || msg.includes('insufficient')) {
+          return { success: false, error: 'One or more items in your cart is no longer available in the requested size.' };
         }
+        console.warn('Supabase RPC order error, switching to safe local order processing:', msg);
       }
     } catch (err: any) {
-      console.warn('Supabase order execution fallback:', err);
+      console.warn('Supabase order execution fallback:', err?.message || err);
     }
   }
 
-  // Atomic local fallback with authoritative delivery calculation
+  // Atomic local fallback with authoritative delivery calculation & size stock verification
   const result = LocalStore.processOrder(validatedPayload);
   if (result.success && result.order) {
     return {

@@ -1,0 +1,24 @@
+# ==============================================================================
+# Bubaé Official Online Store — robots.txt
+# ==============================================================================
+
+User-agent: *
+Allow: /
+Allow: /shop
+Allow: /about
+Allow: /contact
+Allow: /delivery
+Allow: /size-guide
+Allow: /return-policy
+Allow: /faq
+Allow: /product/
+
+# Disallow private admin panel, internal management, and private session paths
+Disallow: /bubae-studio
+Disallow: /bubae-studio/
+Disallow: /bubae-studio/*
+Disallow: /checkout
+Disallow: /cart
+
+# Sitemap declaration
+Sitemap: https://bubae.com/sitemap.xml

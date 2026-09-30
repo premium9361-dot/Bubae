@@ -47,6 +47,18 @@ export function getCachedProductBySlug(slug: string, forCustomer = true): Produc
   return null;
 }
 
+// Synchronous fast getters for zero-delay storefront and shop page rendering
+export function getLocalCustomerProducts(): Product[] {
+  const list = cachedProducts || LocalStore.getProducts();
+  return list
+    .map(p => ensureProductVariants(p))
+    .filter(p => p.is_available && p.stock > 0);
+}
+
+export function getLocalCategories(): Category[] {
+  return cachedCategories || LocalStore.getCategories();
+}
+
 export async function fetchCategories(): Promise<Category[]> {
   const now = Date.now();
   if (cachedCategories && now - cachedCategoriesTimestamp < CACHE_TTL_MS) {

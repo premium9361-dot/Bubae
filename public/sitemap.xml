@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
+  <!-- Core Customer-Facing Pages -->
+  <url>
+    <loc>https://bubae.com/</loc>
+    <changefreq>daily</changefreq>
+    <priority>1.0</priority>
+  </url>
+  <url>
+    <loc>https://bubae.com/shop</loc>
+    <changefreq>daily</changefreq>
+    <priority>0.95</priority>
+  </url>
+  <url>
+    <loc>https://bubae.com/about</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://bubae.com/delivery</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.75</priority>
+  </url>
+  <url>
+    <loc>https://bubae.com/size-guide</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://bubae.com/return-policy</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://bubae.com/faq</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://bubae.com/contact</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.65</priority>
+  </url>
+
+  <!-- Product Pages -->
+  <url>
+    <loc>https://bubae.com/product/black-cargo-pants</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.85</priority>
+    <image:image>
+      <image:loc>https://images.unsplash.com/photo-1594633312681-425c7b97ccd1</image:loc>
+      <image:title>Black Cargo Pants — Bubaé</image:title>
+    </image:image>
+  </url>
+  <url>
+    <loc>https://bubae.com/product/elle-wide-leg-blush-trousers</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.85</priority>
+    <image:image>
+      <image:loc>https://images.unsplash.com/photo-1509551388413-e18d0ac5d495</image:loc>
+      <image:title>Elle Wide-Leg Blush Trousers — Bubaé</image:title>
+    </image:image>
+  </url>
+  <url>
+    <loc>https://bubae.com/product/soft-muse-minimalist-t-shirt</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.85</priority>
+    <image:image>
+      <image:loc>https://images.unsplash.com/photo-1521572267360-ee0c2909d518</image:loc>
+      <image:title>Soft Muse Minimalist T-Shirt — Bubaé</image:title>
+    </image:image>
+  </url>
+  <url>
+    <loc>https://bubae.com/product/aesthetic-milk-white-t-shirt</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.85</priority>
+    <image:image>
+      <image:loc>https://images.unsplash.com/photo-1583743814966-8936f5b7be1a</image:loc>
+      <image:title>Aesthetic Milk White T-Shirt — Bubaé</image:title>
+    </image:image>
+  </url>
+  <url>
+    <loc>https://bubae.com/product/midnight-oversized-boxy-tee</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.85</priority>
+    <image:image>
+      <image:loc>https://images.unsplash.com/photo-1503342217505-b0a15ec3261c</image:loc>
+      <image:title>Midnight Oversized Boxy Tee — Bubaé</image:title>
+    </image:image>
+  </url>
+</urlset>

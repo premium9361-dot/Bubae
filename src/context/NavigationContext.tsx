@@ -1,4 +1,12 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
+import {
+  scrollToTop,
+  scrollToPosition,
+  saveScrollPosition,
+  getSavedScrollPosition,
+  setIsPopState,
+  getIsPopState,
+} from '../lib/scroll';
 
 export type PageRoute = 
   | { name: 'home' }
@@ -24,6 +32,7 @@ export type PageRoute =
 interface NavigationContextType {
   route: PageRoute;
   currentPath: string;
+  isPopState: boolean;
   navigate: (path: string, options?: { replace?: boolean; scroll?: boolean }) => void;
   goBack: () => void;
   openProduct: (slug: string) => void;
@@ -118,21 +127,50 @@ export const NavigationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const [currentPath, setCurrentPath] = useState<string>(() => window.location.pathname);
   const [route, setRoute] = useState<PageRoute>(() => parsePath(window.location.pathname));
   const [historyStack, setHistoryStack] = useState<string[]>(() => [window.location.pathname]);
+  const [isPopStateActive, setIsPopStateActive] = useState<boolean>(false);
 
   useEffect(() => {
     const handlePopState = () => {
-      const path = window.location.pathname;
-      setCurrentPath(path);
-      setRoute(parsePath(path));
-      setHistoryStack(prev => (prev.length > 1 ? prev.slice(0, -1) : [path]));
+      const prevPath = currentPath;
+      saveScrollPosition(prevPath);
+
+      const nextPath = window.location.pathname;
+      setIsPopState(true);
+      setIsPopStateActive(true);
+
+      setCurrentPath(nextPath);
+      setRoute(parsePath(nextPath));
+      setHistoryStack(prev => (prev.length > 1 ? prev.slice(0, -1) : [nextPath]));
+
+      // Restore previously saved scroll position for back/forward navigation
+      const savedY = getSavedScrollPosition(nextPath);
+      if (typeof savedY === 'number') {
+        scrollToPosition(savedY, true);
+      } else {
+        scrollToTop(true);
+      }
+
+      // Reset popstate flag after restoration
+      requestAnimationFrame(() => {
+        setIsPopState(false);
+        setIsPopStateActive(false);
+      });
     };
 
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
-  }, []);
+  }, [currentPath]);
 
   const navigate = (path: string, options?: { replace?: boolean; scroll?: boolean }) => {
     const normalized = path.startsWith('/') ? path : `/${path}`;
+    
+    // Explicit forward navigation
+    setIsPopState(false);
+    setIsPopStateActive(false);
+
+    // Save previous path's scroll offset before transition
+    saveScrollPosition(currentPath);
+
     if (options?.replace) {
       window.history.replaceState({}, '', normalized);
       setHistoryStack(prev => (prev.length > 0 ? [...prev.slice(0, -1), normalized] : [normalized]));
@@ -140,11 +178,14 @@ export const NavigationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       window.history.pushState({}, '', normalized);
       setHistoryStack(prev => [...prev, normalized]);
     }
+
     setCurrentPath(normalized);
     setRoute(parsePath(normalized));
 
-    if (options?.scroll !== false) {
-      window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+    // For any new product page navigation (or standard navigation with scroll: true),
+    // immediately reset scroll position to 0 across Lenis and window
+    if (normalized.startsWith('/product/') || options?.scroll !== false) {
+      scrollToTop(true);
     }
   };
 
@@ -152,7 +193,12 @@ export const NavigationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     // If there is an internal history stack to pop back
     if (historyStack.length > 1) {
       window.history.back();
-    } else if (window.history.length > 1 && typeof document !== 'undefined' && document.referrer && document.referrer.includes(window.location.host)) {
+    } else if (
+      window.history.length > 1 &&
+      typeof document !== 'undefined' &&
+      document.referrer &&
+      document.referrer.includes(window.location.host)
+    ) {
       window.history.back();
     } else {
       // Safe fallback: navigate cleanly to Home
@@ -161,15 +207,26 @@ export const NavigationProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const openProduct = (slug: string) => {
-    navigate(`/product/${slug}`);
+    // Always navigate to product page with guaranteed scroll-to-top
+    navigate(`/product/${slug}`, { scroll: true });
   };
 
   const openCategory = (slug: string) => {
-    navigate(`/category/${slug}`);
+    navigate(`/category/${slug}`, { scroll: true });
   };
 
   return (
-    <NavigationContext.Provider value={{ route, currentPath, navigate, goBack, openProduct, openCategory }}>
+    <NavigationContext.Provider
+      value={{
+        route,
+        currentPath,
+        isPopState: isPopStateActive,
+        navigate,
+        goBack,
+        openProduct,
+        openCategory,
+      }}
+    >
       {children}
     </NavigationContext.Provider>
   );

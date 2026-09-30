@@ -1,6 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigation } from '../context/NavigationContext';
-import { fetchProducts, fetchCategories } from '../services/products';
+import {
+  fetchProducts,
+  fetchCategories,
+  getLocalCustomerProducts,
+  getLocalCategories,
+} from '../services/products';
 import { subscribeToStore } from '../services/localStore';
 import { Product, Category } from '../types';
 import { ProductCard } from '../components/ProductCard';
@@ -22,31 +27,48 @@ interface HomePageProps {
 export const HomePage: React.FC<HomePageProps> = ({ onQuickView }) => {
   const { navigate, openCategory } = useNavigation();
 
-  const [products, setProducts] = useState<Product[]>([]);
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Instantaneous initial mount with cached local products & categories (0ms delay)
+  const [products, setProducts] = useState<Product[]>(() => getLocalCustomerProducts());
+  const [categories, setCategories] = useState<Category[]>(() => getLocalCategories());
+  const [loading, setLoading] = useState<boolean>(() => getLocalCustomerProducts().length === 0);
   const [activeCategory, setActiveCategory] = useState<string>('all');
 
   useEffect(() => {
-    async function loadData() {
-      setLoading(true);
-      const [prods, cats] = await Promise.all([
-        fetchProducts({ forCustomer: true }),
-        fetchCategories(),
-      ]);
-      setProducts(prods);
-      setCategories(cats);
-      setLoading(false);
+    let isMounted = true;
+
+    async function loadData(showSpinner = false) {
+      if (showSpinner) setLoading(true);
+      try {
+        const [prods, cats] = await Promise.all([
+          fetchProducts({ forCustomer: true }),
+          fetchCategories(),
+        ]);
+        if (isMounted) {
+          setProducts(prods);
+          setCategories(cats);
+        }
+      } catch (err) {
+        console.warn('Background sync on home page:', err);
+      } finally {
+        if (isMounted) setLoading(false);
+      }
     }
 
-    loadData();
+    // Only show spinner if we didn't have cached data
+    loadData(products.length === 0);
 
     // Re-fetch automatically when inventory or products change in Admin
     const unsubscribe = subscribeToStore(() => {
-      loadData();
+      if (isMounted) {
+        setProducts(getLocalCustomerProducts());
+        setCategories(getLocalCategories());
+      }
     });
 
-    return unsubscribe;
+    return () => {
+      isMounted = false;
+      unsubscribe();
+    };
   }, []);
 
   const displayedProducts = activeCategory === 'all'
